@@ -8,7 +8,7 @@ conan profile detect --force
 ```
 
 ```bash
-conan install . --output-folder=build --build=missing
+conan install .
 ```
 
 ```bash

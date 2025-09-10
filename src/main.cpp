@@ -1,38 +1,31 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-
-#include <zlib.h>
+#include <GLFW/glfw3.h>
 
 int main(void) {
-    char buffer_in [256] = {"Conan is a MIT-licensed, Open Source package manager for C and C++ development "
-                            "for C and C++ development, allowing development teams to easily and efficiently "
-                            "manage their packages and dependencies across platforms and build systems."};
-    char buffer_out [256] = {0};
+    if (!glfwInit()) {
+        fprintf(stderr, "Failed to initialize GLFW\n");
+        return EXIT_FAILURE;
+    }
 
-    z_stream defstream;
-    defstream.zalloc = Z_NULL;
-    defstream.zfree = Z_NULL;
-    defstream.opaque = Z_NULL;
-    defstream.avail_in = (uInt) strlen(buffer_in);
-    defstream.next_in = (Bytef *) buffer_in;
-    defstream.avail_out = (uInt) sizeof(buffer_out);
-    defstream.next_out = (Bytef *) buffer_out;
+    GLFWwindow* window = glfwCreateWindow(640, 480, "Hello World", NULL, NULL);
+    if (!window) {
+        fprintf(stderr, "Failed to create GLFW window\n");
+        glfwTerminate();
+        return EXIT_FAILURE;
+    }
 
-    deflateInit(&defstream, Z_BEST_COMPRESSION);
-    deflate(&defstream, Z_FINISH);
-    deflateEnd(&defstream);
+    glfwMakeContextCurrent(window);
 
-    printf("Uncompressed size is: %lu\n", strlen(buffer_in));
-    printf("Compressed size is: %lu\n", strlen(buffer_out));
+    while (!glfwWindowShouldClose(window)) {
+        glClear(GL_COLOR_BUFFER_BIT);
 
-    printf("ZLIB VERSION: %s\n", zlibVersion());
+        glfwSwapBuffers(window);
+        glfwPollEvents();
+    }
 
-    #ifdef NDEBUG
-    printf("Release configuration!\n");
-    #else
-    printf("Debug configuration!\n");
-    #endif
-
+    glfwDestroyWindow(window);
+    glfwTerminate();
     return EXIT_SUCCESS;
 }
