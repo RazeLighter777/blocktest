@@ -1,0 +1,18 @@
+# Conan generated files and folders
+build/
+bin/
+lib/
+conan.lock
+conanbuildinfo.cmake
+conanbuildinfo.txt
+conaninfo.txt
+graph_info.json
+.conan/
+conan_package/
+
+# CMake related files (if using CMake)
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+CMakeUserPresets.json
