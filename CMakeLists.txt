@@ -3,11 +3,11 @@ project(blocktest CXX)
 
 set(CMAKE_SKIP_RPATH TRUE)
 
-set(CMAKE_CXX_STANDARD 23) # Sets the C++ standard to C++17
-set(CMAKE_CXX_STANDARD_REQUIRED ON) # Ensures the specified C++ standard is used
+set(CMAKE_CXX_STANDARD 23) # Sets the C++ standard to C++23
+set(CMAKE_CXX_STANDARD_REQUIRED TRUE) # Ensures the specified C++ standard is used
 
-add_executable(${PROJECT_NAME} src/main.cpp)
-
+add_executable(${PROJECT_NAME} src/main.cpp src/emptychunk.cpp src/statefulchunkoverlay.cpp src/bedrockoverlay.cpp)
+add_executable(tests_${PROJECT_NAME} src/tests.cpp src/emptychunk.cpp src/statefulchunkoverlay.cpp src/bedrockoverlay.cpp)
 
 # Find opengl
 find_package(OpenGL REQUIRED)

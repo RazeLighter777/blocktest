@@ -2,30 +2,22 @@
 #include <stdio.h>
 #include <string.h>
 #include <GLFW/glfw3.h>
-
+#include "block.h"
+#include "chunkoverlay.h"
+#include "position.h"
+#include "emptychunk.h"
 int main(void) {
-    if (!glfwInit()) {
-        fprintf(stderr, "Failed to initialize GLFW\n");
-        return EXIT_FAILURE;
+    printf("Block Test Application\n");
+    auto emptyChunk1 = std::make_shared<EmptyChunk>();
+    auto emptyChunk2 = std::make_shared<EmptyChunk>();
+    auto combinedChunk = emptyChunk1 & emptyChunk2;
+    ChunkLocalPosition pos(0, 0, 0);
+    Block block = combinedChunk->getBlock(pos);
+    if (block == Block::Empty) {
+        printf("Block at position (0,0,0) is Empty as expected.\n");
+    } else {
+        printf("Unexpected block type at position (0,0,0).\n");
     }
 
-    GLFWwindow* window = glfwCreateWindow(640, 480, "Hello World", NULL, NULL);
-    if (!window) {
-        fprintf(stderr, "Failed to create GLFW window\n");
-        glfwTerminate();
-        return EXIT_FAILURE;
-    }
-
-    glfwMakeContextCurrent(window);
-
-    while (!glfwWindowShouldClose(window)) {
-        glClear(GL_COLOR_BUFFER_BIT);
-
-        glfwSwapBuffers(window);
-        glfwPollEvents();
-    }
-
-    glfwDestroyWindow(window);
-    glfwTerminate();
     return EXIT_SUCCESS;
 }
