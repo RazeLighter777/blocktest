@@ -15,7 +15,7 @@ public:
     ~StatefulChunkOverlay() override = default;
 
     // Query a block at the given local position. Returns Air if not set.
-    Block getBlock(const ChunkLocalPosition pos) const override;
+    Block getBlock(const ChunkLocalPosition pos, const Block parentLayerBlock = Block::Empty) const override;
 
     // Set a block at the given local position. Setting Air removes the entry.
     void setBlock(const ChunkLocalPosition pos, Block block);

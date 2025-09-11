@@ -9,7 +9,7 @@ public:
     explicit BedrockOverlay(std::shared_ptr<siv::PerlinNoise> noise)
         : noise_(std::move(noise)) {}
 
-    Block getBlock(const ChunkLocalPosition pos) const override;
+    Block getBlock(const ChunkLocalPosition pos, const Block parentLayerBlock = Block::Empty) const override;
     ~BedrockOverlay() override = default;
 
 private:

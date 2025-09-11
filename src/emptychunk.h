@@ -4,6 +4,6 @@
 class EmptyChunk : public ChunkOverlay {
 public:
     EmptyChunk() = default;
-    Block getBlock(const ChunkLocalPosition pos) const override;
+    Block getBlock(const ChunkLocalPosition pos, [[maybe_unused]] const Block parentLayerBlock = Block::Empty) const override;
     ~EmptyChunk() override = default;
 };

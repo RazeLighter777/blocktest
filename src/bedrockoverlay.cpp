@@ -10,7 +10,7 @@ uint8_t BedrockOverlay::thicknessAt(uint8_t x, uint8_t z) const {
     return (t > CHUNK_HEIGHT ? CHUNK_HEIGHT : t);
 }
 
-Block BedrockOverlay::getBlock(const ChunkLocalPosition pos) const {
+Block BedrockOverlay::getBlock(const ChunkLocalPosition pos, [[maybe_unused]] const Block parentLayerBlock) const {
     // Bedrock occupies the bottom layers: y in [0, thicknessAt(x,z)-1]
     const uint8_t t = thicknessAt(pos.x, pos.z);
     if (pos.y < t) {

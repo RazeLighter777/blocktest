@@ -42,12 +42,13 @@ inline bool is_all_zero(const T& obj) {
 }
 } // namespace
 
-Block StatefulChunkOverlay::getBlock(const ChunkLocalPosition pos) const {
-    const auto it = blocks_.find(packKey(pos));
-    if (it == blocks_.end()) {
-        return Block{}; // Assume zero-initialized Block is Air
+Block StatefulChunkOverlay::getBlock(const ChunkLocalPosition pos, [[maybe_unused]] const Block parentLayerBlock) const {
+    const uint32_t key = packKey(pos);
+    auto it = blocks_.find(key);
+    if (it != blocks_.end()) {
+        return it->second;
     }
-    return it->second;
+    return Block::Empty;
 }
 
 void StatefulChunkOverlay::setBlock(const ChunkLocalPosition pos, Block block) {
