@@ -42,19 +42,10 @@ inline bool is_all_zero(const T& obj) {
 }
 } // namespace
 
-Block StatefulChunkOverlay::getBlock(const ChunkLocalPosition pos, [[maybe_unused]] const Block parentLayerBlock) const {
-    const uint32_t key = packKey(pos);
-    auto it = blocks_.find(key);
-    if (it != blocks_.end()) {
-        return it->second;
-    }
-    return Block::Empty;
-}
-
 void StatefulChunkOverlay::setBlock(const ChunkLocalPosition pos, Block block) {
     const uint32_t key = packKey(pos);
     if (is_all_zero(block)) {
-        blocks_.erase(key); // Air: remove entry
+    blocks_.erase(key); // Empty: remove entry
     } else {
         blocks_[key] = block;
     }
@@ -151,16 +142,40 @@ std::optional<StatefulChunkOverlay> StatefulChunkOverlay::deserialize(const std:
 }
 
 StatefulChunkOverlay::StatefulChunkOverlay(const ChunkOverlay& other) {
-    // Populate from another overlay by checking all positions
-    for (uint8_t x = 0; x < CHUNK_WIDTH; ++x) {
-        for (uint8_t y = 0; y < CHUNK_HEIGHT; ++y) {
-            for (uint8_t z = 0; z < CHUNK_DEPTH; ++z) {
-                ChunkLocalPosition pos(x, y, z);
-                Block block = other.getBlock(pos);
-                if (!is_all_zero(block)) {
-                    blocks_[packKey(pos)] = block;
+    // Populate from another overlay by generating its contents and capturing non-Empty entries.
+    std::vector<Block> buf(kChunkElemCount);
+    ChunkSpan span{ buf.data(), CHUNK_WIDTH, static_cast<uint32_t>(CHUNK_WIDTH) * CHUNK_HEIGHT };
+    other.generate(span);
+
+    for (uint32_t z = 0; z < CHUNK_DEPTH; ++z) {
+        for (uint32_t y = 0; y < CHUNK_HEIGHT; ++y) {
+            for (uint32_t x = 0; x < CHUNK_WIDTH; ++x) {
+                const std::size_t idx = static_cast<std::size_t>(z) * span.strideZ + static_cast<std::size_t>(y) * span.strideY + x;
+                const Block b = buf[idx];
+                if (!is_all_zero(b)) {
+                    blocks_[ (static_cast<uint32_t>(x) << 16) | (static_cast<uint32_t>(y) << 8) | static_cast<uint32_t>(z) ] = b;
                 }
             }
         }
+    }
+}
+
+void StatefulChunkOverlay::generateInto(const ChunkSpan& out, const Block* parent) const {
+    // Start by copying parent or filling Empty
+    if (parent) {
+        std::copy(parent, parent + kChunkElemCount, out.data);
+    } else {
+        std::fill(out.data, out.data + kChunkElemCount, Block::Empty);
+    }
+
+    // Apply our sparse edits
+    for (const auto& kv : blocks_) {
+        const uint32_t key = kv.first;
+        const Block b = kv.second;
+        const uint32_t x = (key >> 16) & 0xFFu;
+        const uint32_t y = (key >> 8) & 0xFFu;
+        const uint32_t z = key & 0xFFu;
+        const std::size_t idx = static_cast<std::size_t>(z) * out.strideZ + static_cast<std::size_t>(y) * out.strideY + x;
+        out.data[idx] = b;
     }
 }

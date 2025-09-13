@@ -4,6 +4,10 @@
 class EmptyChunk : public ChunkOverlay {
 public:
     EmptyChunk() = default;
-    Block getBlock(const ChunkLocalPosition pos, [[maybe_unused]] const Block parentLayerBlock = Block::Empty) const override;
     ~EmptyChunk() override = default;
+
+    // Always produce Empty, ignoring any parent input.
+    void generateInto(const ChunkSpan& out, const Block* /*parent*/) const override {
+        std::fill(out.data, out.data + kChunkElemCount, Block::Empty);
+    }
 };

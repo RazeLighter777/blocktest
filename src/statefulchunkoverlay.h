@@ -6,18 +6,18 @@
 #include <vector>
 #include <optional>
 
-// A sparse, mutable chunk overlay that stores only non-Air blocks.
+// A sparse, mutable chunk overlay that stores only non-Empty blocks.
 class StatefulChunkOverlay : public ChunkOverlay {
 public:
     StatefulChunkOverlay() = default;
-    //encodes an existing overlay into a stateful one
+    // Encodes an existing overlay into a stateful one (captures its generated result).
     StatefulChunkOverlay(const ChunkOverlay& other);
     ~StatefulChunkOverlay() override = default;
 
-    // Query a block at the given local position. Returns Air if not set.
-    Block getBlock(const ChunkLocalPosition pos, const Block parentLayerBlock = Block::Empty) const override;
+    // Chunk-wide overlay: start from parent (or Empty) and apply our sparse edits.
+    void generateInto(const ChunkSpan& out, const Block* parent) const override;
 
-    // Set a block at the given local position. Setting Air removes the entry.
+    // Set a block at the given local position. Setting Empty removes the entry.
     void setBlock(const ChunkLocalPosition pos, Block block);
 
     // Serialize to a compact binary representation.

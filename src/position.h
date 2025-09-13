@@ -15,9 +15,9 @@ struct Position {
     Position() = default;
     ~Position() = default;
 
-    const C x = 0;
-    const C y = 0;
-    const C z = 0;
+    C x = 0;
+    C y = 0;
+    C z = 0;
 
     const Position operator+(const C& other) const {
         return Position(x + other.x, y + other.y, z + other.z);
@@ -48,9 +48,9 @@ struct Position<std::uint32_t> {
     Position() = default;
     ~Position() = default;
 
-    const std::uint32_t x = 0;
-    const std::uint32_t y = 0;
-    const std::uint32_t z = 0;
+    std::uint32_t x = 0;
+    std::uint32_t y = 0;
+    std::uint32_t z = 0;
 
     template<typename T>
     const Position operator+(const T& other) const {
