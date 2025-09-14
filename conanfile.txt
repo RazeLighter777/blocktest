@@ -5,7 +5,8 @@ sqlite3/3.50.4
 stb/cci.20240531
 glm/1.0.1
 glew/2.2.0
-
+rpclib/2.3.0
+entt/3.15.0
 [tool_requires]
 cmake/3.27.9
 

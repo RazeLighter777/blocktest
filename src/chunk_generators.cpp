@@ -24,53 +24,53 @@ std::unique_ptr<ChunkSpan> EmptyChunkGenerator::generateChunk(const AbsoluteChun
     return std::make_unique<GeneratedChunkSpan>(pos);
 }
 
-std::unique_ptr<ChunkSpan> TerrainChunkGenerator::generateChunk(const AbsoluteChunkPosition& pos, size_t seed) {
+std::unique_ptr<ChunkSpan> TerrainChunkGenerator::generateChunk(const AbsoluteChunkPosition& pos, size_t /*seed*/) {
     auto chunk = std::make_unique<GeneratedChunkSpan>(pos);
     
-    // Create noise generators
-    auto bedrockNoise = std::make_shared<siv::PerlinNoise>(seed);
-    auto terrainNoise = std::make_shared<siv::PerlinNoise>(seed + 1);
+    // Create flat grass terrain with surface at global y=3
+    const int32_t flatSurfaceHeight = 3;  // Surface at global y=3
     
-    // Create overlay layers from bottom to top
-    std::vector<std::shared_ptr<const ChunkOverlay>> layers;
+    // For chunks that are entirely above the terrain surface, return empty chunks
+    int32_t chunkMinY = pos.y * CHUNK_HEIGHT;
+    int32_t chunkMaxY = chunkMinY + CHUNK_HEIGHT - 1;
+    if (chunkMinY > flatSurfaceHeight + 1 || chunkMaxY < 0) {
+        std::fill(chunk->data, chunk->data + kChunkElemCount, Block::Empty);
+        return chunk;
+    }
     
-    // 1. Bedrock layer at the bottom (1-5 blocks thick)
-    auto bedrock = std::make_shared<PerlinNoiseOverlay>(
-        bedrockNoise, 
-        0.02,     // frequency
-        0.4,      // threshold
-        1,        // base thickness
-        4,        // max extra thickness
-        Block::Bedrock
-    );
-    layers.push_back(bedrock);
+    // Calculate world coordinates for this chunk
+    int32_t worldY = pos.y * CHUNK_HEIGHT;
     
-    // 2. Main stone terrain layer (generates terrain height)
-    auto stoneTerrain = std::make_shared<TerrainHeightOverlay>(
-        terrainNoise,
-        0.01,                    // frequency for terrain variation
-        CHUNK_HEIGHT / 2,        // base height (middle of chunk)
-        CHUNK_HEIGHT / 4,        // height variation (25% of chunk height)
-        Block::Stone
-    );
-    layers.push_back(stoneTerrain);
-    
-    // 3. Dirt layer (replace top 2-3 stone blocks with dirt)
-    auto dirtLayer = std::make_shared<LayerReplaceOverlay>(
-        Block::Stone,   // replace this block type
-        Block::Dirt,    // with this block type
-        0,              // starting from surface (0 blocks down)
-        3               // 3 blocks thick
-    );
-    layers.push_back(dirtLayer);
-    
-    // 4. Grass surface layer
-    auto grassSurface = std::make_shared<SurfaceOverlay>(Block::Grass);
-    layers.push_back(grassSurface);
-    
-    // Compose all layers and generate the terrain
-    auto terrainComposition = compose(layers);
-    terrainComposition->generate(*chunk);
+    // Fill chunk with appropriate blocks based on height
+    for (uint32_t z = 0; z < CHUNK_DEPTH; ++z) {
+        for (uint32_t y = 0; y < CHUNK_HEIGHT; ++y) {
+            for (uint32_t x = 0; x < CHUNK_WIDTH; ++x) {
+                int32_t worldBlockY = worldY + y;
+                const std::size_t idx = static_cast<std::size_t>(z) * chunk->strideZ + 
+                                      static_cast<std::size_t>(y) * chunk->strideY + x;
+                
+                if (worldBlockY < 0) {
+                    // Below ground level: Empty
+                    chunk->data[idx] = Block::Empty;
+                } else if (worldBlockY == 0) {
+                    // Ground level: Bedrock
+                    chunk->data[idx] = Block::Bedrock;
+                } else if (worldBlockY <= 1) {
+                    // Stone layer
+                    chunk->data[idx] = Block::Stone;
+                } else if (worldBlockY <= 2) {
+                    // Dirt layer 
+                    chunk->data[idx] = Block::Dirt;
+                } else if (worldBlockY == 3) {
+                    // Surface: Grass at y=3
+                    chunk->data[idx] = Block::Grass;
+                } else {
+                    // Above surface: Empty
+                    chunk->data[idx] = Block::Empty;
+                }
+            }
+        }
+    }
     
     return chunk;
 }

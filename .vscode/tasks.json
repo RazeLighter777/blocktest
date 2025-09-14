@@ -53,6 +53,14 @@
             },
             "problemMatcher": []
         },
+        {
+            "type": "cmake",
+            "label": "CMake: configure",
+            "command": "configure",
+            "preset": "conan-release",
+            "problemMatcher": [],
+            "detail": "CMake template configure task"
+        }
     ],
     "version": "2.0.0"
 }

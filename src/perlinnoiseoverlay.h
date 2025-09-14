@@ -31,7 +31,7 @@ private:
     double threshold_ = 0.55;   // cutoff to add an extra layer
     uint8_t baseThickness_ = 2; // always at least 2 blocks thick
     uint8_t maxExtra_ = 1;      // can add up to 1 extra layer
-    Block blockType_ = Block::Bedrock;
+    [[maybe_unused]] Block blockType_ = Block::Bedrock;
 
     uint8_t thicknessAt(uint8_t x, uint8_t z) const;
 };

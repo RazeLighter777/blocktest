@@ -9,6 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED TRUE) # Ensures the specified C++ standard is us
 add_executable(${PROJECT_NAME} src/main.cpp src/emptychunk.cpp src/statefulchunkoverlay.cpp src/perlinnoiseoverlay.cpp src/world.cpp src/sqlite_chunk_persistence.cpp src/chunk_generators.cpp src/terrain_overlays.cpp src/texture_loader.cpp src/block.cpp src/shader.cpp src/camera.cpp src/block_renderer.cpp src/chunk_mesh.cpp)
 add_executable(tests_${PROJECT_NAME} src/tests.cpp src/emptychunk.cpp src/statefulchunkoverlay.cpp src/perlinnoiseoverlay.cpp src/world.cpp src/sqlite_chunk_persistence.cpp src/chunk_generators.cpp src/terrain_overlays.cpp src/texture_loader.cpp src/block.cpp src/shader.cpp src/camera.cpp src/block_renderer.cpp src/chunk_mesh.cpp)
 
+include_directories()
 # find glew
 find_package(GLEW REQUIRED)
 # link against glew
@@ -23,8 +24,13 @@ target_link_libraries(${PROJECT_NAME} PRIVATE OpenGL::GL)
 # Find GLFW
 find_package(glfw3 REQUIRED)
 
+# Add GLFW include directories
+target_include_directories(${PROJECT_NAME} PRIVATE ${glfw3_INCLUDE_DIRS})
+target_include_directories(tests_${PROJECT_NAME} PRIVATE ${glfw3_INCLUDE_DIRS})
+
 # Link against GLFW
 target_link_libraries(${PROJECT_NAME} PRIVATE glfw)
+target_link_libraries(tests_${PROJECT_NAME} PRIVATE glfw)
 
 # find sqlite3
 find_package(SQLite3 REQUIRED)
@@ -44,6 +50,18 @@ find_package(glm REQUIRED CONFIG)
 target_link_libraries(${PROJECT_NAME} PRIVATE glm::glm)
 target_link_libraries(tests_${PROJECT_NAME} PRIVATE glm::glm)
 
+
+# find rpclib
+find_package(rpclib REQUIRED CONFIG)
+# link against rpclib
+target_link_libraries(${PROJECT_NAME} PRIVATE rpclib::rpc)
+target_link_libraries(tests_${PROJECT_NAME} PRIVATE rpclib::rpc)
+
+# find entt
+find_package(entt REQUIRED CONFIG)
+# link against entt
+target_link_libraries(${PROJECT_NAME} PRIVATE EnTT::EnTT)
+target_link_libraries(tests_${PROJECT_NAME} PRIVATE EnTT::EnTT)
 # Compile options for code correctness
 target_compile_options(${PROJECT_NAME} PRIVATE
     -Wall

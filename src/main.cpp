@@ -3,6 +3,7 @@
 #include <string.h>
 #include <memory>
 #include <vector>
+#include <cstdio>
 #include "gl_includes.h"
 #include "block.h"
 #include "chunkoverlay.h"
@@ -21,7 +22,7 @@ const unsigned int WINDOW_WIDTH = 800;
 const unsigned int WINDOW_HEIGHT = 600;
 
 // Camera
-Camera camera(glm::vec3(0.0f, 30.0f, 30.0f));
+Camera camera(glm::vec3(0.0f, 5.0f, 5.0f));
 float lastX = WINDOW_WIDTH / 2.0f;
 float lastY = WINDOW_HEIGHT / 2.0f;
 bool firstMouse = true;
@@ -158,7 +159,7 @@ int main(void) {
 
     // --- Texture loading ---
     printf("Loading texture atlas...\n");
-    GLuint atlasTexture = loadTexture("assets/atlas.png");
+    GLuint atlasTexture = loadTexture("C:/Users/utili/Code/blocktest/assets/atlas.png");
     if (atlasTexture == 0) {
         printf("Failed to load atlas texture\n");
         glfwDestroyWindow(window);
@@ -230,6 +231,11 @@ int main(void) {
 
     printf("Starting render loop...\n");
     
+    // Variables for FPS calculation and debug info
+    float fpsTimer = 0.0f;
+    int frameCount = 0;
+    float fps = 0.0f;
+    
     // Main render loop
     int64_t lastAnchorX = 0, lastAnchorY = 0, lastAnchorZ = 0;
     while (!glfwWindowShouldClose(window)) {
@@ -237,21 +243,30 @@ int main(void) {
         float currentFrame = glfwGetTime();
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
+        
+        // Update FPS calculation
+        frameCount++;
+        fpsTimer += deltaTime;
+        if (fpsTimer >= 1.0f) {
+            fps = frameCount / fpsTimer;
+            frameCount = 0;
+            fpsTimer = 0.0f;
+            
+            // Update window title with debug info
+            AbsoluteBlockPosition currentPos = toAbsoluteBlock(AbsolutePrecisePosition(camera.position.x, camera.position.y, camera.position.z));
+            int loadedChunks = static_cast<int>(chunkMeshes.size());
+            
+            char titleBuffer[256];
+            snprintf(titleBuffer, sizeof(titleBuffer), 
+                "BlockTest - Pos: (%.1f, %.1f, %.1f) Block: (%d, %d, %d) Chunks: %d FPS: %.1f",
+                camera.position.x, camera.position.y, camera.position.z,
+                static_cast<int>(currentPos.x), static_cast<int>(currentPos.y), static_cast<int>(currentPos.z),
+                loadedChunks, fps);
+            glfwSetWindowTitle(window, titleBuffer);
+        }
 
         // Process input
         camera.processInput(window, deltaTime);
-
-        // Move camera upward and forward each frame
-        float upwardSpeed = 2.0f; // units per second
-        float forwardSpeed = 5.0f; // units per second
-        glm::vec3 forward = glm::normalize(glm::vec3(camera.front.x, 0.0f, camera.front.z));
-        camera.position += forward * forwardSpeed * deltaTime;
-        camera.position.y += upwardSpeed * deltaTime;
-
-        // Optionally spin the camera
-        float spinSpeed = 200.0f; // degrees per second
-        float yawOffset = spinSpeed * deltaTime;
-        camera.processMouseMovement(yawOffset, 0.0f);
 
         // Update world anchor to camera's current block position
         AbsoluteBlockPosition anchorBlockPos = toAbsoluteBlock(AbsolutePrecisePosition(camera.position.x, camera.position.y, camera.position.z));
