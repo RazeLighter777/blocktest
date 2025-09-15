@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package blockserver;
+
+// Block server service definition
+service BlockServer {
+    // Chunk operations
+    rpc GetChunk(ChunkRequest) returns (ChunkResponse);
+    
+    // Block operations  
+    rpc PlaceBlock(PlaceBlockRequest) returns (PlaceBlockResponse);
+    rpc BreakBlock(BreakBlockRequest) returns (BreakBlockResponse);
+    rpc GetBlockAt(GetBlockRequest) returns (GetBlockResponse);
+    
+    // Utility operations
+    rpc Ping(PingRequest) returns (PingResponse);
+    rpc GetServerInfo(ServerInfoRequest) returns (ServerInfoResponse);
+}
+
+// Chunk operations
+message ChunkRequest {
+    int32 x = 1;
+    int32 y = 2;
+    int32 z = 3;
+}
+
+message ChunkResponse {
+    bool success = 1;
+    bytes chunk_data = 2;
+    string error_message = 3;
+}
+
+// Block operations
+message PlaceBlockRequest {
+    int64 x = 1;
+    int64 y = 2;
+    int64 z = 3;
+    uint32 block_type = 4;
+}
+
+message PlaceBlockResponse {
+    bool success = 1;
+    string error_message = 2;
+}
+
+message BreakBlockRequest {
+    int64 x = 1;
+    int64 y = 2;
+    int64 z = 3;
+}
+
+message BreakBlockResponse {
+    bool success = 1;
+    string error_message = 2;
+}
+
+message GetBlockRequest {
+    int64 x = 1;
+    int64 y = 2;
+    int64 z = 3;
+}
+
+message GetBlockResponse {
+    bool success = 1;
+    uint32 block_type = 2;
+    string error_message = 3;
+}
+
+// Utility operations
+message PingRequest {
+    // Empty message
+}
+
+message PingResponse {
+    bool success = 1;
+}
+
+message ServerInfoRequest {
+    // Empty message
+}
+
+message ServerInfoResponse {
+    bool success = 1;
+    string server_info = 2;
+    string error_message = 3;
+}

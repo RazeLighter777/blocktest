@@ -17,6 +17,7 @@ struct ChunkSpan {
     ChunkSpan(AbsoluteChunkPosition pos) : position(pos) {}
     ChunkSpan(Block* d, std::uint32_t sy, std::uint32_t sz, AbsoluteChunkPosition pos = {0,0,0})
         : data(d), strideY(sy), strideZ(sz), position(pos) {}
+    virtual ~ChunkSpan() = default; // Make it polymorphic for dynamic_cast
 };
 
 static constexpr std::size_t kChunkElemCount =

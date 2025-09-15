@@ -3,11 +3,11 @@ project(blocktest CXX)
 
 set(CMAKE_SKIP_RPATH TRUE)
 
-set(CMAKE_CXX_STANDARD 23) # Sets the C++ standard to C++23
+set(CMAKE_CXX_STANDARD 20) # Sets the C++ standard to C++20
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE) # Ensures the specified C++ standard is used
 
-add_executable(${PROJECT_NAME} src/main.cpp src/emptychunk.cpp src/statefulchunkoverlay.cpp src/perlinnoiseoverlay.cpp src/world.cpp src/sqlite_chunk_persistence.cpp src/chunk_generators.cpp src/terrain_overlays.cpp src/texture_loader.cpp src/block.cpp src/shader.cpp src/camera.cpp src/block_renderer.cpp src/chunk_mesh.cpp)
-add_executable(tests_${PROJECT_NAME} src/tests.cpp src/emptychunk.cpp src/statefulchunkoverlay.cpp src/perlinnoiseoverlay.cpp src/world.cpp src/sqlite_chunk_persistence.cpp src/chunk_generators.cpp src/terrain_overlays.cpp src/texture_loader.cpp src/block.cpp src/shader.cpp src/camera.cpp src/block_renderer.cpp src/chunk_mesh.cpp)
+add_executable(${PROJECT_NAME} src/main.cpp src/emptychunk.cpp src/statefulchunkoverlay.cpp src/perlinnoiseoverlay.cpp src/world.cpp src/sqlite_chunk_persistence.cpp src/chunk_generators.cpp src/terrain_overlays.cpp src/texture_loader.cpp src/block.cpp src/shader.cpp src/camera.cpp src/block_renderer.cpp src/chunk_mesh.cpp src/client.cpp src/server.cpp)
+add_executable(tests_${PROJECT_NAME} src/tests.cpp src/emptychunk.cpp src/statefulchunkoverlay.cpp src/perlinnoiseoverlay.cpp src/world.cpp src/sqlite_chunk_persistence.cpp src/chunk_generators.cpp src/terrain_overlays.cpp src/texture_loader.cpp src/block.cpp src/shader.cpp src/camera.cpp src/block_renderer.cpp src/chunk_mesh.cpp src/client.cpp src/server.cpp)
 
 include_directories()
 # find glew
@@ -51,11 +51,13 @@ target_link_libraries(${PROJECT_NAME} PRIVATE glm::glm)
 target_link_libraries(tests_${PROJECT_NAME} PRIVATE glm::glm)
 
 
-# find rpclib
-find_package(rpclib REQUIRED CONFIG)
-# link against rpclib
-target_link_libraries(${PROJECT_NAME} PRIVATE rpclib::rpc)
-target_link_libraries(tests_${PROJECT_NAME} PRIVATE rpclib::rpc)
+# find grpc and protobuf
+find_package(protobuf REQUIRED)
+find_package(gRPC REQUIRED)
+
+# link against grpc
+target_link_libraries(${PROJECT_NAME} PRIVATE gRPC::grpc++ protobuf::protobuf)
+target_link_libraries(tests_${PROJECT_NAME} PRIVATE gRPC::grpc++ protobuf::protobuf)
 
 # find entt
 find_package(entt REQUIRED CONFIG)
@@ -70,3 +72,31 @@ target_compile_options(${PROJECT_NAME} PRIVATE
     -Werror
     -g
 )
+
+# Add protobuf compilation
+set(PROTO_FILES ${CMAKE_CURRENT_SOURCE_DIR}/proto/blockserver.proto)
+set(PROTO_SRC_DIR ${CMAKE_CURRENT_BINARY_DIR}/proto)
+file(MAKE_DIRECTORY ${PROTO_SRC_DIR})
+
+set(PROTO_SRCS "${PROTO_SRC_DIR}/blockserver.pb.cc")
+set(PROTO_HDRS "${PROTO_SRC_DIR}/blockserver.pb.h")
+set(GRPC_SRCS "${PROTO_SRC_DIR}/blockserver.grpc.pb.cc")
+set(GRPC_HDRS "${PROTO_SRC_DIR}/blockserver.grpc.pb.h")
+
+add_custom_command(
+      OUTPUT "${PROTO_SRCS}" "${PROTO_HDRS}" "${GRPC_SRCS}" "${GRPC_HDRS}"
+      COMMAND protobuf::protoc
+      ARGS --grpc_out "${PROTO_SRC_DIR}"
+           --cpp_out "${PROTO_SRC_DIR}"
+           -I "${CMAKE_CURRENT_SOURCE_DIR}/proto"
+           --plugin=protoc-gen-grpc=$<TARGET_FILE:gRPC::grpc_cpp_plugin>
+           "${PROTO_FILES}"
+      DEPENDS "${PROTO_FILES}")
+
+# Include generated protobuf files
+target_sources(${PROJECT_NAME} PRIVATE ${PROTO_SRCS} ${GRPC_SRCS})
+target_sources(tests_${PROJECT_NAME} PRIVATE ${PROTO_SRCS} ${GRPC_SRCS})
+
+# Include proto headers directory
+target_include_directories(${PROJECT_NAME} PRIVATE ${PROTO_SRC_DIR})
+target_include_directories(tests_${PROJECT_NAME} PRIVATE ${PROTO_SRC_DIR})

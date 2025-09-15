@@ -4,6 +4,8 @@
 #include <memory>
 #include <vector>
 #include <cstdio>
+#include <thread>
+#include <chrono>
 #include "gl_includes.h"
 #include "block.h"
 #include "chunkoverlay.h"
@@ -16,6 +18,8 @@
 #include "chunk_mesh.h"
 #include "world.h"
 #include "chunk_generators.h"
+#include "client.h"
+#include "server.h"
 
 // Window dimensions
 const unsigned int WINDOW_WIDTH = 800;
@@ -111,13 +115,19 @@ void main() {
 )";
 
 int main(void) {
-    printf("Block Test Application\n");
+    printf("Block Test Application Starting...\n");
+    fflush(stdout);
 
     // --- OpenGL/GLFW window setup ---
+    printf("Initializing GLFW...\n");
+    fflush(stdout);
     if (!glfwInit()) {
         fprintf(stderr, "Failed to initialize GLFW\n");
+        fflush(stderr);
         return EXIT_FAILURE;
     }
+    printf("GLFW initialized successfully.\n");
+    fflush(stdout);
     
 
     // Set OpenGL version and profile
@@ -183,46 +193,73 @@ int main(void) {
     loadAnchors.push_back(AbsoluteBlockPosition(0, 0, 0));  // Center around origin
     
     // Create world with terrain generator, load radius, and seed
-    World world(terrainGenerator, loadAnchors, 3, 42);  // Load 3 chunks in each direction
+    auto world = std::make_shared<World>(terrainGenerator, loadAnchors, 3, 42);  // Load 3 chunks in each direction
     
     // Generate chunks around the load anchors
-    world.ensureChunksLoaded();
+    world->ensureChunksLoaded();
     printf("World chunks loaded.\n");
+    //generate random port 
+    uint16_t port = 50000 + (rand() % 10000);
+    // --- Set up Server ---
+    printf("Starting server on port, %d...\n", port);
+    fflush(stdout);
+    Server server(port, world);
+    server.run();  // Run server in background thread
+    
+    // Give server a moment to start up
+    printf("Waiting for server to start...\n");
+    fflush(stdout);
+    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+    
+    // --- Set up Client ---
+    printf("Connecting client to local server...\n");
+    fflush(stdout);
+    Client client("127.0.0.1", port);
+    if (!client.connect()) {
+        printf("Failed to connect to server!\n");
+        fflush(stdout);
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return EXIT_FAILURE;
+    }
+    printf("Client connected to server.\n");
+    
+    // Test server connection
+    if (client.ping()) {
+        printf("Server ping successful!\n");
+    } else {
+        printf("Server ping failed!\n");
+    }
+    fflush(stdout);
     
     // Create chunk meshes for rendering
     std::vector<std::unique_ptr<ChunkMesh>> chunkMeshes;
     std::vector<glm::vec3> chunkPositions;
     
-    // Build meshes for the loaded chunks
+    // Build meshes for the loaded chunks using client
+    printf("Loading initial chunks from server...\n");
+    AbsoluteBlockPosition initialPos = toAbsoluteBlock(AbsolutePrecisePosition(camera.position.x, camera.position.y, camera.position.z));
+    AbsoluteChunkPosition initialChunk = toAbsoluteChunk(initialPos);
+    
+    printf("Initial camera position: (%.1f, %.1f, %.1f)\n", camera.position.x, camera.position.y, camera.position.z);
+    printf("Initial chunk position: (%d, %d, %d)\n", initialChunk.x, initialChunk.y, initialChunk.z);
+    fflush(stdout);
+    
+    // Manually request chunks in the specific range we need for mesh building
+    int chunksRequested = 0;
     for (int x = -3; x <= 3; x++) {
         for (int y = -1; y <= 2; y++) {
             for (int z = -3; z <= 3; z++) {
-                AbsoluteChunkPosition chunkPos(x, y, z);
-                auto chunkOpt = world.chunkAt(chunkPos);
-                if (chunkOpt.has_value()) {
-                    auto chunk = chunkOpt.value();
-                    
-                    // Convert chunk data to vector for mesh building
-                    std::vector<Block> chunkData(kChunkElemCount);
-                    for (size_t i = 0; i < kChunkElemCount; i++) {
-                        chunkData[i] = chunk->data[i];
-                    }
-                    
-                    // Create mesh for this chunk
-                    auto mesh = std::make_unique<ChunkMesh>();
-                    glm::vec3 worldPos(
-                        x * CHUNK_WIDTH,
-                        y * CHUNK_HEIGHT,
-                        z * CHUNK_DEPTH
-                    );
-                    mesh->buildMesh(chunkData, worldPos);
-                    
-                    chunkMeshes.push_back(std::move(mesh));
-                    chunkPositions.push_back(worldPos);
-                }
+                AbsoluteChunkPosition chunkPos(x + initialChunk.x, y + initialChunk.y, z + initialChunk.z);
+                client.requestChunkAsync(chunkPos);
+                chunksRequested++;
+                printf("Requested chunk (%d, %d, %d)\n", chunkPos.x, chunkPos.y, chunkPos.z);
             }
         }
     }
+    
+    printf("Total chunks requested: %d\n", chunksRequested);
+    fflush(stdout);
     
     printf("Built %zu chunk meshes for rendering.\n", chunkMeshes.size());
     
@@ -238,7 +275,30 @@ int main(void) {
     
     // Main render loop
     int64_t lastAnchorX = 0, lastAnchorY = 0, lastAnchorZ = 0;
+    std::unordered_map<AbsoluteChunkPosition, bool, ChunkPosHash, ChunkPosEq> meshBuilt;
+    
+    int frameCounter = 0;
     while (!glfwWindowShouldClose(window)) {
+        frameCounter++;
+        
+        try {
+            // Check for window close events periodically
+            if (frameCounter % 300 == 0) { // Every ~5 seconds at 60fps
+                printf("Frame %d - Window should close: %s\n", frameCounter, 
+                       glfwWindowShouldClose(window) ? "true" : "false");
+                
+                // Check OpenGL errors
+                GLenum error = glGetError();
+
+                if (error != GL_NO_ERROR) {
+                    printf("OpenGL error detected: 0x%x\n", error);
+                }
+                fflush(stdout);
+            }
+        
+        // Process pending chunk requests (non-blocking)
+        client.processPendingRequests();
+        
         // Calculate delta time
         float currentFrame = glfwGetTime();
         deltaTime = currentFrame - lastFrame;
@@ -267,40 +327,82 @@ int main(void) {
 
         // Process input
         camera.processInput(window, deltaTime);
+        
+        // Build meshes for newly loaded chunks
+        AbsoluteBlockPosition currentCameraPos = toAbsoluteBlock(AbsolutePrecisePosition(camera.position.x, camera.position.y, camera.position.z));
+        AbsoluteChunkPosition cameraChunk = toAbsoluteChunk(currentCameraPos);
+        
+        int newMeshesBuilt = 0;
+        for (int x = -3; x <= 3; x++) {
+            for (int y = -1; y <= 2; y++) {
+                for (int z = -3; z <= 3; z++) {
+                    AbsoluteChunkPosition chunkPos(x + cameraChunk.x, y + cameraChunk.y, z + cameraChunk.z);
+                    
+                    // Check if we already built a mesh for this chunk
+                    if (meshBuilt.find(chunkPos) != meshBuilt.end()) {
+                        continue;
+                    }
+                    
+                    // Try to get the chunk from cache
+                    auto chunkOpt = client.getCachedChunk(chunkPos);
+                    if (chunkOpt) {
+                        auto chunk = *chunkOpt;
+                        
+                        // Convert chunk data to vector for mesh building
+                        std::vector<Block> chunkData(kChunkElemCount);
+                        for (size_t i = 0; i < kChunkElemCount; i++) {
+                            chunkData[i] = chunk->data[i];
+                        }
+                        
+                        // Create mesh for this chunk
+                        auto mesh = std::make_unique<ChunkMesh>();
+                        glm::vec3 worldPos(
+                            chunkPos.x * CHUNK_WIDTH,
+                            chunkPos.y * CHUNK_HEIGHT,
+                            chunkPos.z * CHUNK_DEPTH
+                        );
+                        mesh->buildMesh(chunkData, worldPos);
+                        
+                        chunkMeshes.push_back(std::move(mesh));
+                        chunkPositions.push_back(worldPos);
+                        meshBuilt[chunkPos] = true;
+                        newMeshesBuilt++;
+                        
+                        printf("Built mesh for chunk (%d, %d, %d)\n", chunkPos.x, chunkPos.y, chunkPos.z);
+                        fflush(stdout);
+                    }
+                }
+            }
+        }
+        
+        // Print cache status periodically
+        static int debugCounter = 0;
+        debugCounter++;
+        if (debugCounter % 60 == 0) { // Every ~1 second at 60fps
+            printf("Cache size: %zu chunks, Meshes: %zu, New meshes this frame: %d\n", 
+                   client.getCacheSize(), chunkMeshes.size(), newMeshesBuilt);
+            fflush(stdout);
+        }
 
         // Update world anchor to camera's current block position
         AbsoluteBlockPosition anchorBlockPos = toAbsoluteBlock(AbsolutePrecisePosition(camera.position.x, camera.position.y, camera.position.z));
         if (anchorBlockPos.x != lastAnchorX || anchorBlockPos.y != lastAnchorY || anchorBlockPos.z != lastAnchorZ) {
-            world = World(terrainGenerator, {anchorBlockPos}, 3, 42); // update anchor
-            world.ensureChunksLoaded();
-
-            // Rebuild chunk meshes for new loaded chunks
+            // Clear existing meshes and mesh tracking - they'll be rebuilt as chunks load
             chunkMeshes.clear();
             chunkPositions.clear();
+            meshBuilt.clear();
+            
+            // Request new chunks around the new position using the same range as mesh building
+            AbsoluteChunkPosition cameraChunk = toAbsoluteChunk(anchorBlockPos);
             for (int x = -3; x <= 3; x++) {
                 for (int y = -1; y <= 2; y++) {
                     for (int z = -3; z <= 3; z++) {
-                        AbsoluteChunkPosition chunkPos(x + toAbsoluteChunk(anchorBlockPos).x, y + toAbsoluteChunk(anchorBlockPos).y, z + toAbsoluteChunk(anchorBlockPos).z);
-                        auto chunkOpt = world.chunkAt(chunkPos);
-                        if (chunkOpt.has_value()) {
-                            auto chunk = chunkOpt.value();
-                            std::vector<Block> chunkData(kChunkElemCount);
-                            for (size_t i = 0; i < kChunkElemCount; i++) {
-                                chunkData[i] = chunk->data[i];
-                            }
-                            auto mesh = std::make_unique<ChunkMesh>();
-                            glm::vec3 worldPos(
-                                chunkPos.x * CHUNK_WIDTH,
-                                chunkPos.y * CHUNK_HEIGHT,
-                                chunkPos.z * CHUNK_DEPTH
-                            );
-                            mesh->buildMesh(chunkData, worldPos);
-                            chunkMeshes.push_back(std::move(mesh));
-                            chunkPositions.push_back(worldPos);
-                        }
+                        AbsoluteChunkPosition chunkPos(x + cameraChunk.x, y + cameraChunk.y, z + cameraChunk.z);
+                        client.requestChunkAsync(chunkPos);
                     }
                 }
             }
+            
             lastAnchorX = anchorBlockPos.x;
             lastAnchorY = anchorBlockPos.y;
             lastAnchorZ = anchorBlockPos.z;
@@ -342,9 +444,29 @@ int main(void) {
 
         glfwSwapBuffers(window);
         glfwPollEvents();
+        
+        // Check if window should close and why
+        if (glfwWindowShouldClose(window)) {
+            printf("Window close requested at frame %d\n", frameCounter);
+            fflush(stdout);
+            break;
+        }
+        
+        } catch (const std::exception& e) {
+            printf("Exception in render loop at frame %d: %s\n", frameCounter, e.what());
+            fflush(stdout);
+            break;
+        } catch (...) {
+            printf("Unknown exception in render loop at frame %d\n", frameCounter);
+            fflush(stdout);
+            break;
+        }
     }
 
     // Cleanup
+    printf("Shutting down...\n");
+    client.disconnect();
+    server.stop();
     blockRenderer.cleanup();
     for (auto& mesh : chunkMeshes) {
         mesh->cleanup();
