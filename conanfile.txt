@@ -8,6 +8,7 @@ glew/2.2.0
 grpc/1.54.3
 protobuf/3.21.12
 entt/3.15.0
+gtest/1.14.0
 [tool_requires]
 cmake/3.27.9
 
@@ -17,3 +18,17 @@ CMakeToolchain
 
 [layout]
 cmake_layout
+
+[options]
+grpc/*:csharp_ext=False
+grpc/*:cpp_plugin=True
+grpc/*:csharp_plugin=False
+grpc/*:node_plugin=False
+grpc/*:objective_c_plugin=False
+grpc/*:php_plugin=False
+grpc/*:python_plugin=False
+grpc/*:ruby_plugin=False
+grpc/*:otel_plugin=False
+grpc/*:with_libsystemd=False
+
+

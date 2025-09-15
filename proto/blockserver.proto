@@ -6,36 +6,82 @@ package blockserver;
 service BlockServer {
     // Chunk operations
     rpc GetChunk(ChunkRequest) returns (ChunkResponse);
+    rpc GetUpdatedChunks(UpdatedChunksRequest) returns (UpdatedChunksResponse);
     
     // Block operations  
     rpc PlaceBlock(PlaceBlockRequest) returns (PlaceBlockResponse);
     rpc BreakBlock(BreakBlockRequest) returns (BreakBlockResponse);
     rpc GetBlockAt(GetBlockRequest) returns (GetBlockResponse);
     
+    // Player session operations
+    rpc ConnectPlayer(ConnectPlayerRequest) returns (ConnectPlayerResponse);
+    rpc RefreshSession(RefreshSessionRequest) returns (RefreshSessionResponse);
+    rpc UpdatePlayerPosition(UpdatePlayerPositionRequest) returns (UpdatePlayerPositionResponse);
+    rpc DisconnectPlayer(DisconnectPlayerRequest) returns (DisconnectPlayerResponse);
+    
     // Utility operations
     rpc Ping(PingRequest) returns (PingResponse);
     rpc GetServerInfo(ServerInfoRequest) returns (ServerInfoResponse);
+
+    // Entity synchronization
+    rpc GetEntityUpdates(GetEntityUpdatesRequest) returns (GetEntityUpdatesResponse);
 }
 
-// Chunk operations
-message ChunkRequest {
+// Player position
+message PlayerPosition {
+    string player_id = 1;
+    int64 x = 2;
+    int64 y = 3;
+    int64 z = 4;
+}
+
+// Precise player position for session updates
+message PrecisePlayerPosition {
+    string player_id = 1;
+    double x = 2;
+    double y = 3;
+    double z = 4;
+}
+
+// Chunk position
+message ChunkPosition {
     int32 x = 1;
     int32 y = 2;
     int32 z = 3;
 }
 
+// Chunk operations
+message ChunkRequest {
+    PlayerPosition player_position = 1;
+    int32 x = 2;
+    int32 y = 3;
+    int32 z = 4;
+}
+
 message ChunkResponse {
     bool success = 1;
-    bytes chunk_data = 2;
+    optional bytes chunk_data = 2;
+    string error_message = 3;
+}
+
+message UpdatedChunksRequest {
+    PlayerPosition player_position = 1;
+    int32 render_distance = 2;
+}
+
+message UpdatedChunksResponse {
+    bool success = 1;
+    repeated ChunkPosition updated_chunks = 2;
     string error_message = 3;
 }
 
 // Block operations
 message PlaceBlockRequest {
-    int64 x = 1;
-    int64 y = 2;
-    int64 z = 3;
-    uint32 block_type = 4;
+    PlayerPosition player_position = 1;
+    int64 x = 2;
+    int64 y = 3;
+    int64 z = 4;
+    uint32 block_type = 5;
 }
 
 message PlaceBlockResponse {
@@ -44,9 +90,10 @@ message PlaceBlockResponse {
 }
 
 message BreakBlockRequest {
-    int64 x = 1;
-    int64 y = 2;
-    int64 z = 3;
+    PlayerPosition player_position = 1;
+    int64 x = 2;
+    int64 y = 3;
+    int64 z = 4;
 }
 
 message BreakBlockResponse {
@@ -55,9 +102,10 @@ message BreakBlockResponse {
 }
 
 message GetBlockRequest {
-    int64 x = 1;
-    int64 y = 2;
-    int64 z = 3;
+    PlayerPosition player_position = 1;
+    int64 x = 2;
+    int64 y = 3;
+    int64 z = 4;
 }
 
 message GetBlockResponse {
@@ -83,4 +131,67 @@ message ServerInfoResponse {
     bool success = 1;
     string server_info = 2;
     string error_message = 3;
+}
+
+// Entity synchronization
+message GetEntityUpdatesRequest {
+    string session_token = 1;
+}
+
+message EntityUpdate {
+    bytes snapshot_data = 1;
+}
+
+message GetEntityUpdatesResponse {
+    bool success = 1;
+    repeated EntityUpdate updates = 2;
+    string error_message = 3;
+}
+
+// Player session operations
+message ConnectPlayerRequest {
+    string player_name = 1;
+    double spawn_x = 2;
+    double spawn_y = 3;
+    double spawn_z = 4;
+}
+
+message ConnectPlayerResponse {
+    bool success = 1;
+    string session_token = 2;
+    string player_id = 3;
+    double actual_spawn_x = 4;
+    double actual_spawn_y = 5;
+    double actual_spawn_z = 6;
+    string error_message = 7;
+}
+
+message RefreshSessionRequest {
+    string session_token = 1;
+}
+
+message RefreshSessionResponse {
+    bool success = 1;
+    string error_message = 2;
+}
+
+message UpdatePlayerPositionRequest {
+    string session_token = 1;
+    double x = 2;
+    double y = 3;
+    double z = 4;
+}
+
+message UpdatePlayerPositionResponse {
+    bool success = 1;
+    string error_message = 2;
+}
+
+message DisconnectPlayerRequest {
+    string session_token = 1;
+}
+
+message DisconnectPlayerResponse {
+    bool success = 1;
+    string error_message = 2;
 }

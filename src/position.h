@@ -14,6 +14,14 @@ struct Position {
     Position(const Position& other) : x(other.x), y(other.y), z(other.z) {};
     Position() = default;
     ~Position() = default;
+    Position& operator=(const Position& other) {
+        if (this != &other) {
+            x = other.x;
+            y = other.y;
+            z = other.z;
+        }
+        return *this;
+    }
 
     C x = 0;
     C y = 0;
@@ -47,6 +55,15 @@ struct Position<std::uint32_t> {
     }
     Position() = default;
     ~Position() = default;
+    Position& operator=(const Position& other) {
+        if (this != &other) {
+            x = other.x;
+            y = other.y;
+            z = other.z;
+            assert_in_bounds();
+        }
+        return *this;
+    }
 
     std::uint32_t x = 0;
     std::uint32_t y = 0;

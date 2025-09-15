@@ -4,6 +4,9 @@
 #include <string>
 #include <vector>
 #include <thread>
+#include <unordered_set>
+#include <unordered_map>
+#include <mutex>
 #include <grpcpp/grpcpp.h>
 #include "blockserver.grpc.pb.h"
 #include "world.h"
@@ -24,9 +27,6 @@ public:
     void stop();
     bool isRunning() const;
     
-    // Run server in blocking mode
-    void run();
-    
     // World management
     void setWorld(std::shared_ptr<World> world);
     std::shared_ptr<World> getWorld() const;
@@ -39,6 +39,10 @@ public:
     grpc::Status GetChunk(grpc::ServerContext* context,
                          const blockserver::ChunkRequest* request,
                          blockserver::ChunkResponse* response) override;
+                         
+    grpc::Status GetUpdatedChunks(grpc::ServerContext* context,
+                                 const blockserver::UpdatedChunksRequest* request,
+                                 blockserver::UpdatedChunksResponse* response) override;
                          
     grpc::Status PlaceBlock(grpc::ServerContext* context,
                            const blockserver::PlaceBlockRequest* request,
@@ -60,9 +64,29 @@ public:
                               const blockserver::ServerInfoRequest* request,
                               blockserver::ServerInfoResponse* response) override;
 
+    // Player session methods
+    grpc::Status ConnectPlayer(grpc::ServerContext* context,
+                              const blockserver::ConnectPlayerRequest* request,
+                              blockserver::ConnectPlayerResponse* response) override;
+                              
+    grpc::Status RefreshSession(grpc::ServerContext* context,
+                               const blockserver::RefreshSessionRequest* request,
+                               blockserver::RefreshSessionResponse* response) override;
+                               
+    grpc::Status UpdatePlayerPosition(grpc::ServerContext* context,
+                                     const blockserver::UpdatePlayerPositionRequest* request,
+                                     blockserver::UpdatePlayerPositionResponse* response) override;
+                                     
+    grpc::Status DisconnectPlayer(grpc::ServerContext* context,
+                                 const blockserver::DisconnectPlayerRequest* request,
+                                 blockserver::DisconnectPlayerResponse* response) override;
+
 private:
     // Helper methods
     std::vector<uint8_t> serializeChunk(const ChunkSpan& chunk);
+    void markChunkUpdated(const AbsoluteChunkPosition& pos);
+    std::vector<AbsoluteChunkPosition> getUpdatedChunksInRange(const AbsoluteBlockPosition& playerPos, int32_t renderDistance);
+    void sessionCleanupLoop();
     
     // Server state
     std::unique_ptr<grpc::Server> grpcServer_;
@@ -70,4 +94,12 @@ private:
     uint16_t port_;
     bool running_;
     std::unique_ptr<std::thread> serverThread_;
+    
+    // Session timeout handling
+    std::unique_ptr<std::thread> cleanupThread_;
+    std::atomic<bool> shouldStopCleanup_{false};
+    
+    // Chunk update tracking
+    std::unordered_set<AbsoluteChunkPosition, ChunkPosHash, ChunkPosEq> updatedChunks_;
+    std::mutex updatedChunksMutex_;
 };

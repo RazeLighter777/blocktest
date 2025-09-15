@@ -1,34 +1,8 @@
 #include "sqlite_chunk_persistence.h"
-#include "statefulchunkoverlay.h"
 #include "chunkdims.h"
 #include "block.h"
 #include <iostream>
 
-namespace {
-// A ChunkSpan that owns its storage so data remains valid while referenced.
-struct OwningChunkSpan : public ChunkSpan {
-    std::vector<Block> storage;
-    explicit OwningChunkSpan(const AbsoluteChunkPosition pos)
-        : ChunkSpan(pos), storage(kChunkElemCount, Block::Empty) {
-        data = storage.data();
-        // Keep default strides from base: strideY=CHUNK_WIDTH, strideZ=CHUNK_WIDTH*CHUNK_HEIGHT
-    }
-};
-
-// A ChunkSpan that can be persisted using StatefulChunkOverlay
-struct PersistentChunkSpan : public OwningChunkSpan {
-    StatefulChunkOverlay overlay;
-    
-    explicit PersistentChunkSpan(const AbsoluteChunkPosition pos) 
-        : OwningChunkSpan(pos) {}
-        
-    explicit PersistentChunkSpan(const AbsoluteChunkPosition pos, const StatefulChunkOverlay& overlay)
-        : OwningChunkSpan(pos), overlay(overlay) {
-        // Generate the chunk data from the overlay
-        overlay.generate(*this);
-    }
-};
-}
 
 SQLiteChunkPersistence::SQLiteChunkPersistence(std::unique_ptr<sqlite3, decltype(&sqlite3_close)> db)
     : db_(db ? std::shared_ptr<sqlite3>(db.release(), sqlite3_close) : nullptr) {
@@ -56,32 +30,14 @@ void SQLiteChunkPersistence::initializeDatabase() {
     }
 }
 
-bool SQLiteChunkPersistence::saveChunk(const AbsoluteChunkPosition& pos, const ChunkSpan& chunk) {
+bool SQLiteChunkPersistence::saveChunk(const ChunkSpan& chunk) {
     if (!db_) {
         std::cerr << "No database connection for saving chunk\n";
         return false;
     }
     
-    // Create a StatefulChunkOverlay from the chunk data
-    StatefulChunkOverlay overlay;
-    for (uint32_t z = 0; z < CHUNK_DEPTH; ++z) {
-        for (uint32_t y = 0; y < CHUNK_HEIGHT; ++y) {
-            for (uint32_t x = 0; x < CHUNK_WIDTH; ++x) {
-                const std::size_t idx = static_cast<std::size_t>(z) * chunk.strideZ + 
-                                      static_cast<std::size_t>(y) * chunk.strideY + x;
-                const Block block = chunk.data[idx];
-                if (block != Block::Empty) {
-                    overlay.setBlock(ChunkLocalPosition(x, y, z), block);
-                }
-            }
-        }
-    }
-    
-    // Serialize the overlay
-    std::vector<uint8_t> serializedData = overlay.serialize();
-    std::cerr << "Saving chunk (" << pos.x << "," << pos.y << "," << pos.z << ") with " 
-              << serializedData.size() << " bytes\n";
-    
+    const AbsoluteChunkPosition& pos = chunk.position;
+    auto serializedData = chunk.serialize();
     // Prepare SQL statement
     const char* sql = R"sql(
         INSERT OR REPLACE INTO chunks (x, y, z, data) 
@@ -168,22 +124,20 @@ std::optional<std::shared_ptr<ChunkSpan>> SQLiteChunkPersistence::loadChunk(cons
     
     sqlite3_finalize(stmt);
     
-    // Deserialize the overlay
-    auto overlayOpt = StatefulChunkOverlay::deserialize(serializedData);
-    if (!overlayOpt.has_value()) {
-        std::cerr << "Failed to deserialize chunk overlay\n";
+    try {
+        auto chunk = std::make_shared<ChunkSpan>(serializedData);
+        return chunk;
+    } catch (const std::exception& ex) {
+        std::cerr << "Failed to deserialize chunk: " << ex.what() << "\n";
         return std::nullopt;
     }
-    
-    // Create a PersistentChunkSpan with the loaded overlay
-    auto chunk = std::make_shared<PersistentChunkSpan>(pos, overlayOpt.value());
-    return std::static_pointer_cast<ChunkSpan>(chunk);
 }
 
 void SQLiteChunkPersistence::saveAllLoadedChunks(const ChunkMap& chunks) {
     if (!db_) return;
-    
-    for (const auto& kv : chunks) {
-        saveChunk(kv.first, *kv.second);
+    for (const auto& [pos, chunk] : chunks) {
+        if (chunk) {
+            saveChunk(*chunk);
+        }
     }
 }

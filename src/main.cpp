@@ -8,9 +8,8 @@
 #include <chrono>
 #include "gl_includes.h"
 #include "block.h"
-#include "chunkoverlay.h"
+#include "chunktransform.h"
 #include "position.h"
-#include "emptychunk.h"
 #include "texture_loader.h"
 #include "shader.h"
 #include "camera.h"
@@ -169,7 +168,7 @@ int main(void) {
 
     // --- Texture loading ---
     printf("Loading texture atlas...\n");
-    GLuint atlasTexture = loadTexture("C:/Users/utili/Code/blocktest/assets/atlas.png");
+    GLuint atlasTexture = loadTexture("/workspaces/blocktest/assets/atlas.png");
     if (atlasTexture == 0) {
         printf("Failed to load atlas texture\n");
         glfwDestroyWindow(window);
@@ -186,26 +185,33 @@ int main(void) {
     
     // --- Create World with terrain generation ---
     printf("Creating world with terrain generator...\n");
-    auto terrainGenerator = std::make_shared<TerrainChunkGenerator>();
+    auto terrainGenerator = std::make_shared<FlatworldChunkGenerator>(1, Block::Grass);
     
     // Set load anchors around the camera starting position
-    std::vector<AbsoluteBlockPosition> loadAnchors;
-    loadAnchors.push_back(AbsoluteBlockPosition(0, 0, 0));  // Center around origin
+    std::vector<AbsoluteBlockPosition> loadAnchorsVector;
+    loadAnchorsVector.push_back(AbsoluteBlockPosition(0, 0, 0));  // Center around origin
+    
+    // Create a lambda that returns the load anchors
+    auto loadAnchorsCallback = [loadAnchorsVector]() { return loadAnchorsVector; };
     
     // Create world with terrain generator, load radius, and seed
-    auto world = std::make_shared<World>(terrainGenerator, loadAnchors, 3, 42);  // Load 3 chunks in each direction
+    auto world = std::make_shared<World>(terrainGenerator, loadAnchorsCallback, 3, 42);  // Load 3 chunks in each direction
     
     // Generate chunks around the load anchors
     world->ensureChunksLoaded();
-    printf("World chunks loaded.\n");
-    //generate random port 
-    uint16_t port = 50000 + (rand() % 10000);
+    printf("World chunks loaded.\n"); 
+    uint16_t port = 50000;
     // --- Set up Server ---
     printf("Starting server on port, %d...\n", port);
     fflush(stdout);
     Server server(port, world);
-    server.run();  // Run server in background thread
-    
+    if (!server.start()) {
+        printf("Failed to start server!\n");
+        fflush(stdout);
+        glfwDestroyWindow(window);
+        glfwTerminate();
+        return EXIT_FAILURE;
+    }
     // Give server a moment to start up
     printf("Waiting for server to start...\n");
     fflush(stdout);
@@ -214,7 +220,7 @@ int main(void) {
     // --- Set up Client ---
     printf("Connecting client to local server...\n");
     fflush(stdout);
-    Client client("127.0.0.1", port);
+    Client client("127.0.0.1", port, "player1");  // Add player ID
     if (!client.connect()) {
         printf("Failed to connect to server!\n");
         fflush(stdout);
@@ -287,6 +293,20 @@ int main(void) {
                 printf("Frame %d - Window should close: %s\n", frameCounter, 
                        glfwWindowShouldClose(window) ? "true" : "false");
                 
+                // Update client's player position
+                AbsoluteBlockPosition currentPos = toAbsoluteBlock(AbsolutePrecisePosition(camera.position.x, camera.position.y, camera.position.z));
+                client.setPlayerPosition(currentPos);
+                
+                // Check for updated chunks from server
+                auto updatedChunks = client.getUpdatedChunks(5); // 5 chunk render distance
+                if (!updatedChunks.empty()) {
+                    printf("Server reported %zu updated chunks\n", updatedChunks.size());
+                    // Request the updated chunks
+                    for (const auto& chunkPos : updatedChunks) {
+                        client.requestChunkAsync(chunkPos);
+                    }
+                }
+                
                 // Check OpenGL errors
                 GLenum error = glGetError();
 
@@ -328,6 +348,10 @@ int main(void) {
         // Process input
         camera.processInput(window, deltaTime);
         
+        // Update player position in client
+        AbsoluteBlockPosition currentPos = toAbsoluteBlock(AbsolutePrecisePosition(camera.position.x, camera.position.y, camera.position.z));
+        client.setPlayerPosition(currentPos);
+        
         // Build meshes for newly loaded chunks
         AbsoluteBlockPosition currentCameraPos = toAbsoluteBlock(AbsolutePrecisePosition(camera.position.x, camera.position.y, camera.position.z));
         AbsoluteChunkPosition cameraChunk = toAbsoluteChunk(currentCameraPos);
@@ -349,9 +373,10 @@ int main(void) {
                         auto chunk = *chunkOpt;
                         
                         // Convert chunk data to vector for mesh building
-                        std::vector<Block> chunkData(kChunkElemCount);
-                        for (size_t i = 0; i < kChunkElemCount; i++) {
-                            chunkData[i] = chunk->data[i];
+                        const size_t chunkElemCount = CHUNK_WIDTH * CHUNK_HEIGHT * CHUNK_DEPTH;
+                        std::vector<Block> chunkData(chunkElemCount);
+                        for (size_t i = 0; i < chunkElemCount; i++) {
+                            chunkData[i] = chunk->storage[i];
                         }
                         
                         // Create mesh for this chunk

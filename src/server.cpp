@@ -1,5 +1,4 @@
 #include "server.h"
-#include "statefulchunkoverlay.h"
 #include "chunkdims.h"
 #include <iostream>
 #include <stdexcept>
@@ -35,6 +34,11 @@ bool Server::start() {
         
         running_ = true;
         std::cout << "Server started on " << server_address << std::endl;
+        
+        // Start session cleanup thread
+        shouldStopCleanup_ = false;
+        cleanupThread_ = std::make_unique<std::thread>(&Server::sessionCleanupLoop, this);
+        
         return true;
     } catch (const std::exception& e) {
         std::cerr << "Failed to start server: " << e.what() << std::endl;
@@ -51,6 +55,12 @@ void Server::stop() {
     std::cout << "Stopping server..." << std::endl;
     running_ = false;
     
+    // Stop session cleanup thread
+    shouldStopCleanup_ = true;
+    if (cleanupThread_ && cleanupThread_->joinable()) {
+        cleanupThread_->join();
+    }
+    
     if (grpcServer_) {
         grpcServer_->Shutdown();
         grpcServer_.reset();
@@ -63,18 +73,6 @@ bool Server::isRunning() const {
     return running_;
 }
 
-void Server::run() {
-    if (!running_ && !start()) {
-        throw std::runtime_error("Failed to start server");
-    }
-    
-    std::cout << "Server running on port " << port_ << ". Press Ctrl+C to stop." << std::endl;
-    
-    // Wait for server shutdown
-    if (grpcServer_) {
-        grpcServer_->Wait();
-    }
-}
 
 void Server::setWorld(std::shared_ptr<World> world) {
     world_ = world;
@@ -96,7 +94,11 @@ std::string Server::getServerInfo() const {
 grpc::Status Server::GetChunk(grpc::ServerContext* context,
                              const blockserver::ChunkRequest* request,
                              blockserver::ChunkResponse* response) {
-    std::cout << "[gRPC] GetChunk request: (" << request->x() << ", " << request->y() << ", " << request->z() << ")" << std::endl;
+    std::cout << "[gRPC] GetChunk request: (" << request->x() << ", " << request->y() << ", " << request->z() << ")";
+    if (request->has_player_position()) {
+        std::cout << " from player: " << request->player_position().player_id();
+    }
+    std::cout << std::endl;
     
     if (!world_) {
         std::cerr << "No world instance available" << std::endl;
@@ -109,9 +111,9 @@ grpc::Status Server::GetChunk(grpc::ServerContext* context,
     auto chunkOpt = world_->chunkAt(pos);
     
     if (!chunkOpt) {
-        std::cerr << "Chunk not found at position (" << request->x() << ", " << request->y() << ", " << request->z() << ")" << std::endl;
-        response->set_success(false);
-        response->set_error_message("Chunk not found");
+        std::clog << "Chunk not found at (" << request->x() << ", " << request->y() << ", " << request->z() << ")" << std::endl;
+        //still succeed, just no chunk data. ok because it's an optional field now
+        response->set_success(true);
         return grpc::Status::OK;
     }
     
@@ -121,6 +123,38 @@ grpc::Status Server::GetChunk(grpc::ServerContext* context,
     
     std::cout << "[gRPC] GetChunk response for (" << request->x() << ", " << request->y() << ", " << request->z()
               << ") size: " << chunkData.size() << " bytes" << std::endl;
+    
+    return grpc::Status::OK;
+}
+
+grpc::Status Server::GetUpdatedChunks(grpc::ServerContext* context,
+                                     const blockserver::UpdatedChunksRequest* request,
+                                     blockserver::UpdatedChunksResponse* response) {
+    if (!request->has_player_position()) {
+        response->set_success(false);
+        response->set_error_message("Player position required");
+        return grpc::Status::OK;
+    }
+    
+    const auto& playerPos = request->player_position();
+    AbsoluteBlockPosition blockPos{playerPos.x(), playerPos.y(), playerPos.z()};
+    int32_t renderDistance = request->render_distance();
+    
+    std::cout << "[gRPC] GetUpdatedChunks request from player: " << playerPos.player_id() 
+              << " at (" << playerPos.x() << ", " << playerPos.y() << ", " << playerPos.z() << ")"
+              << " render distance: " << renderDistance << std::endl;
+    
+    auto updatedChunks = getUpdatedChunksInRange(blockPos, renderDistance);
+    
+    response->set_success(true);
+    for (const auto& chunkPos : updatedChunks) {
+        auto* chunk = response->add_updated_chunks();
+        chunk->set_x(chunkPos.x);
+        chunk->set_y(chunkPos.y);
+        chunk->set_z(chunkPos.z);
+    }
+    
+    std::cout << "[gRPC] GetUpdatedChunks response: " << updatedChunks.size() << " updated chunks" << std::endl;
     
     return grpc::Status::OK;
 }
@@ -136,42 +170,28 @@ grpc::Status Server::PlaceBlock(grpc::ServerContext* context,
     }
     
     AbsoluteBlockPosition pos{request->x(), request->y(), request->z()};
-    AbsoluteChunkPosition chunkPos = toAbsoluteChunk(pos);
-    
-    // Get or load the chunk
-    auto chunkOpt = world_->chunkAt(chunkPos);
-    if (!chunkOpt) {
-        std::cerr << "Failed to get chunk for block placement at (" << request->x() << ", " << request->y() << ", " << request->z() << ")" << std::endl;
-        response->set_success(false);
-        response->set_error_message("Failed to get chunk");
-        return grpc::Status::OK;
-    }
-    
-    // Calculate local position within chunk
-    auto localPos = toChunkLocal(pos, chunkPos);
-    
-    // Validate local position bounds
-    if (localPos.x >= CHUNK_WIDTH || localPos.y >= CHUNK_HEIGHT || localPos.z >= CHUNK_DEPTH ||
-        localPos.x < 0 || localPos.y < 0 || localPos.z < 0) {
-        std::cerr << "Invalid local position (" << localPos.x << ", " << localPos.y << ", " << localPos.z << ")" << std::endl;
-        response->set_success(false);
-        response->set_error_message("Invalid local position");
-        return grpc::Status::OK;
-    }
-    
-    // Set the block
-    auto& chunk = **chunkOpt;
-    const std::size_t idx = static_cast<std::size_t>(localPos.z) * chunk.strideZ + 
-                          static_cast<std::size_t>(localPos.y) * chunk.strideY + localPos.x;
-    
     Block newBlock = static_cast<Block>(request->block_type());
-    chunk.data[idx] = newBlock;
     
-    // If the chunk supports persistence, save it
-    world_->saveChunk(chunkPos, chunk);
+    // Use the World's setBlockIfLoaded method
+    bool success = world_->setBlockIfLoaded(pos, newBlock);
     
-    std::cout << "Placed block " << request->block_type() << " at (" << request->x() << ", " << request->y() << ", " << request->z() << ")" << std::endl;
-    response->set_success(true);
+    if (success) {
+        // Mark the chunk as updated
+        AbsoluteChunkPosition chunkPos = toAbsoluteChunk(pos);
+        markChunkUpdated(chunkPos);
+        
+        std::string playerInfo = "";
+        if (request->has_player_position()) {
+            playerInfo = " by player " + request->player_position().player_id();
+        }
+        std::cout << "Placed block " << request->block_type() << " at (" << request->x() << ", " << request->y() << ", " << request->z() << ")" << playerInfo << std::endl;
+        response->set_success(true);
+    } else {
+        std::cerr << "Failed to place block - chunk not loaded at (" << request->x() << ", " << request->y() << ", " << request->z() << ")" << std::endl;
+        response->set_success(false);
+        response->set_error_message("Chunk not loaded");
+    }
+    
     return grpc::Status::OK;
 }
 
@@ -180,6 +200,9 @@ grpc::Status Server::BreakBlock(grpc::ServerContext* context,
                                blockserver::BreakBlockResponse* response) {
     // Create a PlaceBlockRequest with Empty block type
     blockserver::PlaceBlockRequest placeRequest;
+    if (request->has_player_position()) {
+        *placeRequest.mutable_player_position() = request->player_position();
+    }
     placeRequest.set_x(request->x());
     placeRequest.set_y(request->y());
     placeRequest.set_z(request->z());
@@ -205,31 +228,18 @@ grpc::Status Server::GetBlockAt(grpc::ServerContext* context,
     }
     
     AbsoluteBlockPosition pos{request->x(), request->y(), request->z()};
-    AbsoluteChunkPosition chunkPos = toAbsoluteChunk(pos);
     
-    auto chunkOpt = world_->chunkAt(chunkPos);
-    if (!chunkOpt) {
-        response->set_success(true);
-        response->set_block_type(static_cast<uint32_t>(Block::Empty));
-        return grpc::Status::OK;
-    }
-    
-    auto localPos = toChunkLocal(pos, chunkPos);
-    
-    // Validate bounds
-    if (localPos.x >= CHUNK_WIDTH || localPos.y >= CHUNK_HEIGHT || localPos.z >= CHUNK_DEPTH ||
-        localPos.x < 0 || localPos.y < 0 || localPos.z < 0) {
-        response->set_success(true);
-        response->set_block_type(static_cast<uint32_t>(Block::Empty));
-        return grpc::Status::OK;
-    }
-    
-    auto& chunk = **chunkOpt;
-    const std::size_t idx = static_cast<std::size_t>(localPos.z) * chunk.strideZ + 
-                          static_cast<std::size_t>(localPos.y) * chunk.strideY + localPos.x;
+    // Use the World's getBlockIfLoaded method
+    auto blockOpt = world_->getBlockIfLoaded(pos);
     
     response->set_success(true);
-    response->set_block_type(static_cast<uint32_t>(chunk.data[idx]));
+    if (blockOpt.has_value()) {
+        response->set_block_type(static_cast<uint32_t>(blockOpt.value()));
+    } else {
+        // If chunk is not loaded, return Empty block
+        response->set_block_type(static_cast<uint32_t>(Block::Empty));
+    }
+    
     return grpc::Status::OK;
 }
 
@@ -248,42 +258,182 @@ grpc::Status Server::GetServerInfo(grpc::ServerContext* context,
     return grpc::Status::OK;
 }
 
-std::vector<uint8_t> Server::serializeChunk(const ChunkSpan& chunk) {
-    // Create a StatefulChunkOverlay from the chunk data
-    StatefulChunkOverlay overlay;
+grpc::Status Server::ConnectPlayer(grpc::ServerContext* context,
+                                  const blockserver::ConnectPlayerRequest* request,
+                                  blockserver::ConnectPlayerResponse* response) {
+    std::cout << "[gRPC] ConnectPlayer request from: " << request->player_name() 
+              << " at (" << request->spawn_x() << ", " << request->spawn_y() << ", " << request->spawn_z() << ")" << std::endl;
     
-    for (uint32_t z = 0; z < CHUNK_DEPTH; ++z) {
-        for (uint32_t y = 0; y < CHUNK_HEIGHT; ++y) {
-            for (uint32_t x = 0; x < CHUNK_WIDTH; ++x) {
-                const std::size_t idx = static_cast<std::size_t>(z) * chunk.strideZ + 
-                                      static_cast<std::size_t>(y) * chunk.strideY + x;
-                const Block block = chunk.data[idx];
-                if (block != Block::Empty) {
-                    overlay.setBlock(ChunkLocalPosition(x, y, z), block);
-                }
-            }
-        }
+    if (!world_) {
+        std::cerr << "No world instance available" << std::endl;
+        response->set_success(false);
+        response->set_error_message("No world instance available");
+        return grpc::Status::OK;
     }
     
-    return overlay.serialize();
+    if (request->player_name().empty()) {
+        response->set_success(false);
+        response->set_error_message("Player name cannot be empty");
+        return grpc::Status::OK;
+    }
+    
+    try {
+        AbsolutePrecisePosition spawnPos{request->spawn_x(), request->spawn_y(), request->spawn_z()};
+        
+        // Create player session
+        std::string sessionToken = world_->createPlayerSession(request->player_name(), spawnPos);
+        
+        response->set_success(true);
+        response->set_session_token(sessionToken);
+        response->set_player_id(request->player_name()); // For now, use name as ID
+        response->set_actual_spawn_x(spawnPos.x);
+        response->set_actual_spawn_y(spawnPos.y);
+        response->set_actual_spawn_z(spawnPos.z);
+        
+        std::cout << "[gRPC] Player " << request->player_name() << " connected with session: " 
+                  << sessionToken.substr(0, 8) << "..." << std::endl;
+        
+    } catch (const std::exception& e) {
+        std::cerr << "Failed to connect player: " << e.what() << std::endl;
+        response->set_success(false);
+        response->set_error_message("Failed to create player session");
+    }
+    
+    return grpc::Status::OK;
+}
+
+grpc::Status Server::RefreshSession(grpc::ServerContext* context,
+                                   const blockserver::RefreshSessionRequest* request,
+                                   blockserver::RefreshSessionResponse* response) {
+    if (!world_) {
+        response->set_success(false);
+        response->set_error_message("No world instance available");
+        return grpc::Status::OK;
+    }
+    
+    if (request->session_token().empty()) {
+        response->set_success(false);
+        response->set_error_message("Session token cannot be empty");
+        return grpc::Status::OK;
+    }
+    
+    bool success = world_->refreshPlayerSession(request->session_token());
+    response->set_success(success);
+    
+    if (!success) {
+        response->set_error_message("Invalid or expired session token");
+    }
+    
+    return grpc::Status::OK;
+}
+
+grpc::Status Server::UpdatePlayerPosition(grpc::ServerContext* context,
+                                         const blockserver::UpdatePlayerPositionRequest* request,
+                                         blockserver::UpdatePlayerPositionResponse* response) {
+    if (!world_) {
+        response->set_success(false);
+        response->set_error_message("No world instance available");
+        return grpc::Status::OK;
+    }
+    
+    if (request->session_token().empty()) {
+        response->set_success(false);
+        response->set_error_message("Session token cannot be empty");
+        return grpc::Status::OK;
+    }
+    
+    // Validate session first
+    if (!world_->isValidSession(request->session_token())) {
+        response->set_success(false);
+        response->set_error_message("Invalid or expired session token");
+        return grpc::Status::OK;
+    }
+    
+    AbsolutePrecisePosition newPos{request->x(), request->y(), request->z()};
+    bool success = world_->updatePlayerPosition(request->session_token(), newPos);
+    
+    response->set_success(success);
+    if (!success) {
+        response->set_error_message("Failed to update player position");
+    }
+    
+    return grpc::Status::OK;
+}
+
+grpc::Status Server::DisconnectPlayer(grpc::ServerContext* context,
+                                     const blockserver::DisconnectPlayerRequest* request,
+                                     blockserver::DisconnectPlayerResponse* response) {
+    if (!world_) {
+        response->set_success(false);
+        response->set_error_message("No world instance available");
+        return grpc::Status::OK;
+    }
+    
+    if (request->session_token().empty()) {
+        response->set_success(false);
+        response->set_error_message("Session token cannot be empty");
+        return grpc::Status::OK;
+    }
+    
+    auto sessionOpt = world_->getPlayerSession(request->session_token());
+    if (sessionOpt.has_value()) {
+        std::cout << "[gRPC] Disconnecting player: " << sessionOpt.value().playerName << std::endl;
+        world_->disconnectPlayerBySession(request->session_token());
+        response->set_success(true);
+    } else {
+        response->set_success(false);
+        response->set_error_message("Invalid session token");
+    }
+    
+    return grpc::Status::OK;
 }
 
 std::vector<uint8_t> Server::serializeChunk(const ChunkSpan& chunk) {
-    // Create a StatefulChunkOverlay from the chunk data
-    StatefulChunkOverlay overlay;
+    return chunk.serialize();
+}
+
+void Server::markChunkUpdated(const AbsoluteChunkPosition& pos) {
+    std::lock_guard<std::mutex> lock(updatedChunksMutex_);
+    updatedChunks_.insert(pos);
+}
+
+std::vector<AbsoluteChunkPosition> Server::getUpdatedChunksInRange(const AbsoluteBlockPosition& playerPos, int32_t renderDistance) {
+    std::lock_guard<std::mutex> lock(updatedChunksMutex_);
+    std::vector<AbsoluteChunkPosition> result;
     
-    for (uint32_t z = 0; z < CHUNK_DEPTH; ++z) {
-        for (uint32_t y = 0; y < CHUNK_HEIGHT; ++y) {
-            for (uint32_t x = 0; x < CHUNK_WIDTH; ++x) {
-                const std::size_t idx = static_cast<std::size_t>(z) * chunk.strideZ + 
-                                      static_cast<std::size_t>(y) * chunk.strideY + x;
-                const Block block = chunk.data[idx];
-                if (block != Block::Empty) {
-                    overlay.setBlock(ChunkLocalPosition(x, y, z), block);
-                }
-            }
+    AbsoluteChunkPosition playerChunk = toAbsoluteChunk(playerPos);
+    
+    for (const auto& chunkPos : updatedChunks_) {
+        // Calculate distance in chunks
+        int32_t dx = std::abs(chunkPos.x - playerChunk.x);
+        int32_t dy = std::abs(chunkPos.y - playerChunk.y);
+        int32_t dz = std::abs(chunkPos.z - playerChunk.z);
+        
+        // Use Manhattan distance for simplicity
+        int32_t distance = std::max({dx, dy, dz});
+        
+        if (distance <= renderDistance) {
+            result.push_back(chunkPos);
         }
     }
     
-    return overlay.serialize();
+    // Clear the updated chunks list after returning them
+    updatedChunks_.clear();
+    
+    return result;
+}
+
+void Server::sessionCleanupLoop() {
+    while (!shouldStopCleanup_) {
+        try {
+            // Sleep for 1 second between cleanup checks
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            
+            if (world_ && !shouldStopCleanup_) {
+                world_->cleanupExpiredSessions();
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error in session cleanup: " << e.what() << std::endl;
+        }
+    }
 }
